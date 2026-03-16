@@ -1,0 +1,18 @@
+# Ignore local virtual environments
+.venv/
+venv/
+
+# Ignore Python caches
+__pycache__/
+*.pyc
+
+# Ignore Git and IDE files
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Ignore other development artifacts
+*.log
+*.tmp
+.env
