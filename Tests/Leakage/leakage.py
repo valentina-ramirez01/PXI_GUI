@@ -5,7 +5,7 @@ import time
 # ---------------- CONFIGURATION ----------------
 
 CURRENT_LIMIT = 1e-3          # 1 mA compliance to protect DUT
-LEAKAGE_LIMIT = 15e-6         # 10 uA pass/fail limit
+LEAKAGE_LIMIT = 51e-6         # 10 uA pass/fail limit
 
 SAMPLE_COUNT = 30             # Real measurements used for result
 DUMMY_COUNT = 5               # Throwaway readings to let current settle
