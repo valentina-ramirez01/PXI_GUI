@@ -7,9 +7,9 @@ import nidmm
 
 # ---------------- DEFAULT CONFIGURATION ----------------
 
-SMU_RESOURCE = "PXI1Slot5"     # PXIe-4138 for VSRC1
+SMU_RESOURCE = "SMU"     # PXIe-4138 for VSRC1
 PS_RESOURCE = "PXI4110"        # PXI-4110 from NI MAX
-DMM_RESOURCE = "PXI1Slot7"     # PXIe-4080
+DMM_RESOURCE = "PXI4080"     # PXIe-4080
 
 PS_POS_CHANNEL = "1"           # +15 V
 PS_NEG_CHANNEL = "2"           # -15 V
@@ -23,7 +23,7 @@ SMU_CURRENT_LIMIT = 1e-3
 R1 = 1e3
 R2 = 100e3
 
-SAMPLE_COUNT = 20
+SAMPLE_COUNT = 30
 MEASURE_DELAY = 0.1
 SETTLE_DELAY = 2.0
 
@@ -31,9 +31,9 @@ SETTLE_DELAY = 2.0
 # ---------------- SESSION HELPERS ----------------
 
 def open_sessions():
-    ps_session = nidcpower.Session(PS_RESOURCE, reset=True)
-    smu_session = nidcpower.Session(SMU_RESOURCE, reset=True)
-    dmm_session = nidmm.Session(DMM_RESOURCE, reset=True)
+    ps_session = nidcpower.Session(PS_RESOURCE)
+    smu_session = nidcpower.Session(SMU_RESOURCE)
+    dmm_session = nidmm.Session(DMM_RESOURCE)
     return ps_session, smu_session, dmm_session
 
 
