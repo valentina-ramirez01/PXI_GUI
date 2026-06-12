@@ -7,7 +7,7 @@ import nidmm
 
 # ---------------- DEFAULT CONFIGURATION ----------------
 
-SMU_RESOURCE = "SMU"          # PXIe-4138 for common-mode input
+SMU_RESOURCE = "SMU1"          # PXIe-4138 for common-mode input
 PS_RESOURCE = "PXI4110"       # PXI-4110
 DMM_RESOURCE = "PXI4080"      # PXIe-4080
 

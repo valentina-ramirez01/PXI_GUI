@@ -7,13 +7,13 @@ import nidmm
 
 # ---------------- DEFAULT CONFIGURATION ----------------
 
-SMU_RESOURCE = "SMU"     # PXIe-4138 for VSRC1
+SMU_RESOURCE = "SMU1"     # PXIe-4138 for VSRC1
 PS_RESOURCE = "PXI4110"        # PXI-4110 from NI MAX
 DMM_RESOURCE = "PXI4080"     # PXIe-4080
 
 PS_POS_CHANNEL = "1"           # +15 V
 PS_NEG_CHANNEL = "2"           # -15 V
-
+9
 POS_SUPPLY_V = 15.0
 NEG_SUPPLY_V = -15.0
 PS_CURRENT_LIMIT = 0.1

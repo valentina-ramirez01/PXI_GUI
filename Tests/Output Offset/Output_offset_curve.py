@@ -13,7 +13,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 
 PS_RESOURCE = "PXI4110"
-SMU_RESOURCE = "SMU"
+SMU_RESOURCE = "SMU1"
 DMM_RESOURCE = "PXI4080"
 
 PS_POS_CHANNEL = "1"

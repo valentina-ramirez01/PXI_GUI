@@ -1,138 +1,278 @@
-import nidcpower
-import nidmm
-import time
-import numpy as np
+import tkinter as tk
+from tkinter import ttk, messagebox
+import threading
 import math
 
+import matplotlib
+matplotlib.use("TkAgg")
 
-def run_pss_test(
-    smu_neg_resource,
-    smu_pos_resource,
-    dmm_resource,
-    sample_delay,
-    sample_count,
-    psu_resource,
-    voltage_start=5,
-    voltage_stop=10,
-    voltage_step=1,
-    settling_time=1,
-    max_test_current=50e-3,
-    dmm_voltage_range=2,
-    dmm_timeout=2.0,
-):
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-    def generate_sweep(start, stop, step):
-        values = []
-        v = start
-        while v <= stop + 1e-12:
-            values.append(round(v, 6))
-            v += step
-        return values
+from PSS_Test import run_pss_test
+from Close_Loop_Gain_PSSR import run_closed_loop_gain   
 
-    smu_neg = None
-    smu_pos = None
-    dmm = None
 
-    try:
-        print("\n==============================")
-        print("PSS TEST START")
-        print("==============================")
+class PSS_GUI:
 
-        psu = nidcpower.Session(psu_resource, reset=False)
-        vin_ch = psu.channels["0"]
-        vin_ch.output_function = nidcpower.OutputFunction.DC_VOLTAGE
-        vin_ch.voltage_level = 0.0
-        vin_ch.current_limit = 0.1
-        vin_ch.output_enabled = True
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Power Supply Sensitivity + PSRR Test")
+        self.root.geometry("1300x900")
 
-        dmm = nidmm.Session(dmm_resource)
-        dmm.configure_measurement_digits(
-            nidmm.Function.DC_VOLTS,
-            dmm_voltage_range,
-            6.5
+        # ---------------- LEFT PANEL ----------------
+        left = ttk.Frame(root, padding=10)
+        left.pack(side="left", fill="y")
+
+        ttk.Label(left, text="PSS + PSRR TEST", font=("Arial", 16, "bold")).pack()
+
+        # ---------------- SMU / DMM / PSU ----------------
+        self.smu_neg = ttk.Entry(left)
+        self.smu_neg.insert(0, "SMU1")
+        ttk.Label(left, text="SMU Negative").pack()
+        self.smu_neg.pack()
+
+        self.smu_pos = ttk.Entry(left)
+        self.smu_pos.insert(0, "SMU2")
+        ttk.Label(left, text="SMU Positive").pack()
+        self.smu_pos.pack()
+
+        self.dmm = ttk.Entry(left)
+        self.dmm.insert(0, "Multimeter")
+        ttk.Label(left, text="DMM").pack()
+        self.dmm.pack()
+
+        self.psu = ttk.Entry(left)
+        self.psu.insert(0, "PSU")
+        ttk.Label(left, text="PSU").pack()
+        self.psu.pack()
+
+        self.psu_channel = ttk.Entry(left)
+        self.psu_channel.insert(0, "0")
+        ttk.Label(left, text="PSU Channel").pack()
+        self.psu_channel.pack()
+
+        # ---------------- PSS SETTINGS ----------------
+        self.samples = ttk.Entry(left)
+        self.samples.insert(0, "30")
+        ttk.Label(left, text="Samples").pack()
+        self.samples.pack()
+
+        self.delay = ttk.Entry(left)
+        self.delay.insert(0, "0.001")
+        ttk.Label(left, text="Sample Delay").pack()
+        self.delay.pack()
+
+        self.start_v = ttk.Entry(left)
+        self.start_v.insert(0, "5")
+        ttk.Label(left, text="Start V").pack()
+        self.start_v.pack()
+
+        self.stop_v = ttk.Entry(left)
+        self.stop_v.insert(0, "10")
+        ttk.Label(left, text="Stop V").pack()
+        self.stop_v.pack()
+
+        self.step_v = ttk.Entry(left)
+        self.step_v.insert(0, "1")
+        ttk.Label(left, text="Step V").pack()
+        self.step_v.pack()
+
+        # ---------------- CLOSED LOOP GAIN INPUT ----------------
+        ttk.Label(left, text="--- Closed Loop Gain Setup ---", font=("Arial", 11, "bold")).pack(pady=5)
+
+        self.vin0 = ttk.Entry(left)
+        self.vin0.insert(0, "0.0")
+        ttk.Label(left, text="VIN0 (V)").pack()
+        self.vin0.pack()
+
+        self.vin1 = ttk.Entry(left)
+        self.vin1.insert(0, "1.0")
+        ttk.Label(left, text="VIN1 (V)").pack()
+        self.vin1.pack()
+
+        # ---------------- PASS CRITERIA ----------------
+        ttk.Label(left, text="--- PASS CRITERIA ---", font=("Arial", 11, "bold")).pack(pady=5)
+        self.max_psrr_uv = ttk.Entry(left)
+        self.max_psrr_uv.insert(0, "30") 
+        ttk.Label(left, text="Max PSRR (uV/V)").pack()
+        self.max_psrr_uv.pack()
+
+        # ---------------- BUTTON ----------------
+        self.btn = ttk.Button(left, text="RUN TEST", command=self.start)
+        self.btn.pack(pady=10)
+
+        self.result = ttk.Label(left, text="READY", font=("Arial", 12, "bold"))
+        self.result.pack(pady=5)
+
+        # ---------------- RESULTS ----------------
+        self.pass_label = ttk.Label(left, text="STATUS: ---", font=("Arial", 12, "bold"))
+        self.pass_label.pack(pady=10)
+
+        self.pss_label = ttk.Label(left, text="PSS: --- uV/V")
+        self.pss_label.pack()
+
+        self.db_label = ttk.Label(left, text="PSS: --- dB")
+        self.db_label.pack()
+
+        self.gain_label = ttk.Label(left, text="Gain: --- V/V")
+        self.gain_label.pack()
+
+        self.psrr_label = ttk.Label(left, text="PSRR: ---")
+        self.psrr_label.pack()
+
+        self.psrr_db_label = ttk.Label(left, text="PSRR dB: ---")
+        self.psrr_db_label.pack()
+
+        # ---------------- PLOT ----------------
+        right = ttk.Frame(root)
+        right.pack(side="right", fill="both", expand=True)
+
+        self.fig = Figure(figsize=(7, 5))
+        self.ax = self.fig.add_subplot(111)
+        self.ax.set_title("PSS Result")
+        self.ax.set_xlabel("Supply (V)")
+        self.ax.set_ylabel("Vout (V)")
+        self.ax.grid()
+
+        self.canvas = FigureCanvasTkAgg(self.fig, master=right)
+        self.canvas.get_tk_widget().pack(fill="both", expand=True)
+
+    # ==========================================================
+    # START THREAD
+    # ==========================================================
+    def start(self):
+        self.btn.config(state="disabled")
+        self.result.config(text="RUNNING")
+
+        threading.Thread(target=self.worker, daemon=True).start()
+
+    def worker(self):
+        try:
+            # ---------------- CLOSED LOOP GAIN ----------------
+            gain = run_closed_loop_gain(
+                self.psu.get(),
+                self.smu_neg.get(),
+                self.smu_pos.get(),
+                self.dmm.get(),
+                self.psu_channel.get(),   # <<< ADD THIS
+                float(self.vin0.get()),
+                float(self.vin1.get()),
+                sample_count=int(self.samples.get())
+            )
+
+            # ---------------- PSS TEST ----------------
+            r = run_pss_test(
+                smu_neg_resource=self.smu_neg.get(),
+                smu_pos_resource=self.smu_pos.get(),
+                dmm_resource=self.dmm.get(),
+                psu_resource=self.psu.get(),   # <<< ADD THIS
+                sample_count=int(self.samples.get()),
+                sample_delay=float(self.delay.get()),
+                voltage_start=float(self.start_v.get()),
+                voltage_stop=float(self.stop_v.get()),
+                voltage_step=float(self.step_v.get()),
+            )
+            r["gain"] = gain
+
+            self.root.after(0, lambda: self.update(r))
+
+        except Exception as e:
+            self.root.after(0, lambda: self.fail(str(e)))
+
+    # ==========================================================
+    # UPDATE UI
+    # ==========================================================
+    def update(self, r):
+
+        gain = r["gain"]
+
+        # ---------------- PSRR ----------------
+        psrr_uv_per_v = r["pss_uv_per_v"] / gain if gain != 0 else float("inf")
+
+        psrr_db = 20 * math.log10(psrr_uv_per_v / 1e6) if psrr_uv_per_v > 0 else float("-inf")
+
+        # ---------------- PASS CRITERIA ----------------
+        max_psrr = float(self.max_psrr_uv.get())
+
+        psrr_ok = psrr_uv_per_v <= max_psrr
+
+        if psrr_ok:
+            status = "PASS"
+            color = "green"
+        else:
+            status = "FAIL"
+            color = "red"
+
+        # ---------------- UI UPDATE ----------------
+        self.pass_label.config(
+            text=f"STATUS: {status}",
+            foreground=color
         )
 
-        smu_neg = nidcpower.Session(smu_neg_resource, reset=True)
-        smu_pos = nidcpower.Session(smu_pos_resource, reset=True)
+        self.result.config(
+            text="PSS = {:.3f} uV/V | {:.2f} dB\nPSRR = {:.3f} uV/V | {:.2f} dB".format(
+                r["pss_uv_per_v"],
+                r["pss_db"],
+                psrr_uv_per_v,   # make sure this exists in your update()
+                psrr_db
+            )
+        )
 
-        for smu in (smu_neg, smu_pos):
-            smu.source_mode = nidcpower.SourceMode.SINGLE_POINT
-            smu.output_function = nidcpower.OutputFunction.DC_VOLTAGE
-            smu.voltage_level_range = voltage_stop * 1.5
-            smu.current_limit = max_test_current
-            smu.output_enabled = True
+        self.pss_label.config(
+            text="PSS: {:.6f} uV/V".format(r["pss_uv_per_v"])
+        )
 
-        supply_values = generate_sweep(voltage_start, voltage_stop, voltage_step)
+        self.db_label.config(
+            text="PSS: {:.3f} dB".format(r["pss_db"])
+        )
 
-        vout_avg = []
-        vout_std = []
+        self.gain_label.config(
+            text="Gain: {:.6f} V/V".format(gain)
+        )
 
-        psu.initiate()
-        smu_pos.initiate()
-        smu_neg.initiate()
+        self.psrr_label.config(
+            text="PSRR: {:.6f} uV/V".format(psrr_uv_per_v)
+        )
 
-        for v in supply_values:
+        self.psrr_db_label.config(
+            text="PSRR dB: {:.3f}".format(psrr_db)
+        )
 
-            print(f"\nSupply = Â±{v:.3f} V")
+        # ---------------- PLOT ----------------
+        self.ax.clear()
+        self.ax.grid()
+        self.ax.set_title("Power Supply Sensitivity")
+        self.ax.set_xlabel("Supply (V)")
+        self.ax.set_ylabel("Vout (V)")
 
-            smu_pos.voltage_level = v
-            smu_neg.voltage_level = -v
+        self.ax.errorbar(
+            r["supply"],
+            r["vout_avg"],
+            yerr=r["vout_std"],
+            fmt="o-",
+            label="Measured"
+        )
 
-            time.sleep(settling_time)
+        fit = [r["slope"] * x + r["intercept"] for x in r["supply"]]
+        self.ax.plot(r["supply"], fit, "--", label="Fit")
 
-            samples = []
+        self.ax.legend()
+        self.canvas.draw()
 
-            for i in range(sample_count):
-                try:
-                    val = float(dmm.read(dmm_timeout))
-                    print(f"  Sample {i+1:02d}: {val:.9f} V")
-                    samples.append(val)
-                except Exception as e:
-                    print(f"  Sample {i+1:02d} ERROR: {e}")
+        self.btn.config(state="normal")
+        
+    # ==========================================================
+    # ERROR
+    # ==========================================================
+    def fail(self, msg):
+        messagebox.showerror("Error", msg)
+        self.result.config(text="FAIL")
+        self.btn.config(state="normal")
 
-                time.sleep(sample_delay)
 
-            if len(samples) == 0:
-                raise RuntimeError("No valid DMM samples collected")
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = PSS_GUI(root)
+    root.mainloop()
 
-            vout_avg.append(np.mean(samples))
-            vout_std.append(np.std(samples))
-
-        slope, intercept = np.polyfit(supply_values, vout_avg, 1)
-
-        pss_v_per_v = abs(slope)
-        pss_uv_per_v = pss_v_per_v * 1e6
-        pss_db = 20 * math.log10(pss_v_per_v) if pss_v_per_v > 0 else float("-inf")
-
-        return {
-            "supply": supply_values,
-            "vout_avg": vout_avg,
-            "vout_std": vout_std,
-            "slope": slope,
-            "intercept": intercept,
-            "pss_uv_per_v": pss_uv_per_v,
-            "pss_db": pss_db,
-        }
-
-    finally:
-        try:
-            if smu_pos:
-                smu_pos.voltage_level = 0
-                smu_pos.output_enabled = False
-                smu_pos.close()
-        except:
-            pass
-
-        try:
-            if smu_neg:
-                smu_neg.voltage_level = 0
-                smu_neg.output_enabled = False
-                smu_neg.close()
-        except:
-            pass
-
-        try:
-            if dmm:
-                dmm.close()
-        except:
-            pass

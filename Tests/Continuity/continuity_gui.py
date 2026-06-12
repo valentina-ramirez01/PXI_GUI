@@ -1,260 +1,333 @@
-from PySide6.QtWidgets import (
-    QApplication, QWidget, QPushButton, QLabel,
-    QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QDoubleSpinBox, QComboBox, QTableWidget, QTableWidgetItem, QSpinBox
-)
-from PySide6.QtCore import Qt
-from qtutils import inmain_later
+import sys
 import threading
 import time
 
+from PySide6.QtWidgets import (
+    QApplication, QWidget, QPushButton, QLabel,
+    QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
+    QDoubleSpinBox, QComboBox, QTableWidget,
+    QTableWidgetItem, QSpinBox, QGroupBox
+)
+from PySide6.QtCore import Qt, Signal, QObject
 
-# ------------------------------
-# Worker thread function
-# ------------------------------
-def long_task(callback, passfail_callback, table_callback, params, stop_flag):
+
+class GuiSignals(QObject):
+    label_signal = Signal(str)
+    passfail_signal = Signal(str)
+    table_signal = Signal(int, str)
+
+
+def long_task(signals, params, stop_flag):
     pin_count = params["Input pins"]
     vdd = int(params["Vdd pin"])
     gnd = int(params["Gnd pin"])
+    tested_pin = int(params["Pin being tested"])
 
     vlow = params["Vlow (V)"]
     vhigh = params["Vhigh (V)"]
 
-    # Build list of test pins (exclude Vdd and Gnd)
-    test_pins = [p for p in range(1, pin_count + 1) if p not in (vdd, gnd)]
+    if tested_pin in (vdd, gnd):
+        signals.passfail_signal.emit("FAIL")
+        signals.label_signal.emit("Selected pin cannot be Vdd or Gnd.")
+        return
 
     overall_pass = True
 
-    for row_index, pin in enumerate(test_pins):
+    for row_index, pin in enumerate([tested_pin]):
 
         if stop_flag["stop"]:
-            inmain_later(callback, "Stopped")
-            inmain_later(passfail_callback, "FAIL")
+            signals.label_signal.emit("Stopped")
+            signals.passfail_signal.emit("FAIL")
             return
 
         time.sleep(0.4)
 
-        # Generate arbitrary fake voltage
-        voltage = round(0.5 + 0.05 * pin, 3)  # example formula
+        voltage = round(0.5 + 0.05 * pin, 3)
 
-        # Update table with voltage
-        inmain_later(table_callback, row_index, f"{voltage} V")
+        signals.table_signal.emit(row_index, f"{voltage} V")
 
-        # Check pass/fail
         if not (vlow <= voltage <= vhigh):
             overall_pass = False
 
-    # Final result
-    inmain_later(passfail_callback, "PASS" if overall_pass else "FAIL")
-    inmain_later(callback, "Done!")
+    signals.passfail_signal.emit("PASS" if overall_pass else "FAIL")
+    signals.label_signal.emit("Done!")
 
-# ------------------------------
-# Main GUI Window
-# ------------------------------
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
 
         self.setWindowTitle("Continuity Test GUI")
-        self.resize(600, 550)
+        self.resize(950, 650)
 
         self.running = False
         self.stop_flag = {"stop": False}
 
+        self.signals = GuiSignals()
+        self.signals.label_signal.connect(self.update_label)
+        self.signals.passfail_signal.connect(self.update_passfail)
+        self.signals.table_signal.connect(self.update_table_result)
+
+        main_layout = QHBoxLayout()
+
+        left_layout = QVBoxLayout()
+        right_layout = QVBoxLayout()
+
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignLeft)
 
-        # --------------------------
-        # DUT SPECIFICATIONS SECTION
-        # --------------------------
-        
         dut_label = QLabel("<b>DUT Specifications</b>")
-        dut_label.setContentsMargins(0, 10, 0, 5)
         form.addRow(dut_label)
 
-        # 1. Chip name
-        self.chip_name = QLineEdit()
+        self.chip_name = QLineEdit("OPA551")
         form.addRow("Chip name:", self.chip_name)
 
-        # 2. Pins (minimum 4)
         self.pins = QSpinBox()
-        self.pins.setRange(4, 12)
-        form.addRow("Pins:", self.pins)
+        self.pins.setRange(4, 16)
+        self.pins.setValue(8)
+        form.addRow("Total pins:", self.pins)
 
-        # 3. Vdd pin
         self.vdd_pin = QComboBox()
         form.addRow("Vdd pin:", self.vdd_pin)
 
-        # 4. Gnd pin
         self.gnd_pin = QComboBox()
         form.addRow("Gnd pin:", self.gnd_pin)
 
-        # --------------------------
-        # RIGHT SIDE: RESULTS TABLE
-        # --------------------------
-        self.table = QTableWidget()
-        self.table.setColumnCount(2)
-        self.table.setHorizontalHeaderLabels(["Pin", "Result"])
+        self.tested_pin = QComboBox()
+        form.addRow("Pin being tested:", self.tested_pin)
 
-        # Connect AFTER table exists
-        self.pins.valueChanged.connect(self.update_pin_choices)
-        self.vdd_pin.currentIndexChanged.connect(self.update_pin_choices)
-        self.gnd_pin.currentIndexChanged.connect(self.update_pin_choices)
-
-        # Initialize dropdowns and table
-        self.update_pin_choices()
-
-        # --------------------------
-        # TEST CONDITIONS SECTION
-        # --------------------------
         test_label = QLabel("<b>Test Conditions</b>")
-        test_label.setContentsMargins(0, 15, 0, 5)
         form.addRow(test_label)
 
-        # 5. Max current
         self.max_current = QDoubleSpinBox()
-        self.max_current.setRange(1, 10)
+        self.max_current.setRange(0.001, 10)
+        self.max_current.setValue(1.0)
         self.max_current.setSuffix(" mA")
         form.addRow("Max current:", self.max_current)
 
-        # 6. Vlow + Vhigh
         vrange_layout = QHBoxLayout()
+
         self.vlow = QDoubleSpinBox()
         self.vlow.setRange(0, 1)
+        self.vlow.setValue(0.55)
         self.vlow.setSuffix(" V")
+
         self.vhigh = QDoubleSpinBox()
         self.vhigh.setRange(0, 1)
+        self.vhigh.setValue(0.75)
         self.vhigh.setSuffix(" V")
+
         vrange_layout.addWidget(QLabel("Vlow:"))
         vrange_layout.addWidget(self.vlow)
         vrange_layout.addWidget(QLabel("Vhigh:"))
         vrange_layout.addWidget(self.vhigh)
-        form.addRow("Voltage range:", vrange_layout)
-        self.vlow.setValue(0.55)
-        self.vhigh.setValue(0.75)
 
-        # PASS/FAIL
+        form.addRow("Voltage range:", vrange_layout)
+
         self.passfail_label = QLabel("READY")
+        self.passfail_label.setAlignment(Qt.AlignCenter)
         self.passfail_label.setStyleSheet("background-color: lightgray; padding: 6px;")
         form.addRow("Result:", self.passfail_label)
 
-        # Status label
         self.label = QLabel("Ready")
 
-        # Start/Stop button
         self.button = QPushButton("Start")
         self.button.clicked.connect(self.start_or_stop)
 
-        # --------------------------
-        # TEST DESCRIPTION NOTE
-        # --------------------------
-        # Left layout
-        left_layout = QVBoxLayout()
-        
+        self.load_opa_button = QPushButton("Load OPA551 Pinout")
+        self.load_opa_button.clicked.connect(self.load_opa551_pinout)
+
         self.subtitle = QLabel("<b>Continuity Test</b>")
         self.subtitle.setStyleSheet("font-size: 14px;")
-        self.subtitle.setContentsMargins(0, 0, 0, 5)
-        left_layout.addWidget(self.subtitle)
-        self.description = QLabel(
-            "This test measures per-pin voltages for a given forced current until " \
-            "the specified voltage range is met. Result voltage is averaged " \
-            "using 30 samples. Vdd and Gnd pins are excluded from testing."
-        )
-        self.description.setStyleSheet("font-size: 12px; color: #333;")
-        self.description.setWordWrap(True)
-        left_layout.addWidget(self.description)
 
+        self.description = QLabel(
+            "This test measures the selected pin voltage for a forced current. "
+            "Vdd and Gnd pins are excluded from testing."
+        )
+        self.description.setWordWrap(True)
+        self.description.setStyleSheet("font-size: 12px; color: #333;")
+
+        left_layout.addWidget(self.subtitle)
+        left_layout.addWidget(self.description)
         left_layout.addLayout(form)
+        left_layout.addWidget(self.load_opa_button)
         left_layout.addWidget(self.label)
         left_layout.addWidget(self.button)
 
-        # --------------------------
-        # MAIN LAYOUT (Center + RIGHT)
-        # --------------------------
-        main_layout = QHBoxLayout()
+        pin_group = QGroupBox("Pin Names")
+        self.pin_name_form = QFormLayout()
+        self.pin_name_boxes = []
+
+        for i in range(16):
+            box = QLineEdit()
+            box.setPlaceholderText(f"PIN{i + 1}")
+            self.pin_name_boxes.append(box)
+            self.pin_name_form.addRow(f"Pin {i + 1}:", box)
+
+        pin_group.setLayout(self.pin_name_form)
+        right_layout.addWidget(pin_group)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels([
+            "Pin #", "Pin Name", "Result", "Pass/Fail"
+        ])
+        right_layout.addWidget(self.table)
+
         main_layout.addLayout(left_layout, 1)
-        main_layout.addWidget(self.table, 1)
+        main_layout.addLayout(right_layout, 1)
 
         self.setLayout(main_layout)
 
-    # ------------------------------
-    # Update Vdd/Gnd dropdowns AND table
-    # ------------------------------
+        self.pins.valueChanged.connect(self.update_pin_choices)
+        self.vdd_pin.currentIndexChanged.connect(self.update_pin_choices)
+        self.gnd_pin.currentIndexChanged.connect(self.update_pin_choices)
+        self.tested_pin.currentIndexChanged.connect(self.update_table_rows)
+
+        self.update_pin_choices()
+        self.load_opa551_pinout()
+
+    def get_pin_names(self):
+        names = {}
+        for i in range(self.pins.value()):
+            text = self.pin_name_boxes[i].text().strip()
+            names[i + 1] = text if text else f"PIN{i + 1}"
+        return names
+
+    def load_opa551_pinout(self):
+        names = {
+            1: "NC",
+            2: "IN+",
+            3: "IN-",
+            4: "V+",
+            5: "NC",
+            6: "OUT",
+            7: "V-",
+            8: "Flag",
+        }
+
+        self.pins.setValue(8)
+
+        for i in range(16):
+            self.pin_name_boxes[i].clear()
+
+        for pin, name in names.items():
+            self.pin_name_boxes[pin - 1].setText(name)
+
+        self.vdd_pin.setCurrentText("5")
+        self.gnd_pin.setCurrentText("2")
+        self.update_pin_choices()
+
     def update_pin_choices(self):
         count = int(self.pins.value())
 
-        # Save current selections
         old_vdd = self.vdd_pin.currentText()
         old_gnd = self.gnd_pin.currentText()
+        old_tested = self.tested_pin.currentText()
 
-        # Rebuild dropdowns
+        for box_index, box in enumerate(self.pin_name_boxes):
+            box.setVisible(box_index < count)
+
         self.vdd_pin.blockSignals(True)
         self.gnd_pin.blockSignals(True)
+        self.tested_pin.blockSignals(True)
 
         self.vdd_pin.clear()
         self.gnd_pin.clear()
+        self.tested_pin.clear()
 
         for i in range(1, count + 1):
             self.vdd_pin.addItem(str(i))
             self.gnd_pin.addItem(str(i))
+            self.tested_pin.addItem(str(i))
 
-        # Restore selections if still valid
         if old_vdd in [str(i) for i in range(1, count + 1)]:
             self.vdd_pin.setCurrentText(old_vdd)
+
         if old_gnd in [str(i) for i in range(1, count + 1)]:
             self.gnd_pin.setCurrentText(old_gnd)
 
-        # Ensure Vdd != Gnd
+        if old_tested in [str(i) for i in range(1, count + 1)]:
+            self.tested_pin.setCurrentText(old_tested)
+
         if self.vdd_pin.currentText() == self.gnd_pin.currentText():
-            # Move Gnd to next available pin
             idx = (self.vdd_pin.currentIndex() + 1) % count
             self.gnd_pin.setCurrentIndex(idx)
 
+        if self.tested_pin.currentText() in (
+            self.vdd_pin.currentText(),
+            self.gnd_pin.currentText()
+        ):
+            for i in range(count):
+                candidate = str(i + 1)
+                if candidate not in (
+                    self.vdd_pin.currentText(),
+                    self.gnd_pin.currentText()
+                ):
+                    self.tested_pin.setCurrentText(candidate)
+                    break
+
         self.vdd_pin.blockSignals(False)
         self.gnd_pin.blockSignals(False)
+        self.tested_pin.blockSignals(False)
 
-        # Update table
         self.update_table_rows()
 
-    # ------------------------------
-    # Update table row count (exclude Vdd/Gnd)
-    # ------------------------------
     def update_table_rows(self):
-        count = int(self.pins.value())
-        vdd = int(self.vdd_pin.currentText())
-        gnd = int(self.gnd_pin.currentText())
+        if not self.tested_pin.currentText():
+            return
 
-        test_pins = [p for p in range(1, count + 1) if p not in (vdd, gnd)]
+        pin = int(self.tested_pin.currentText())
+        names = self.get_pin_names()
+        pin_name = names.get(pin, f"PIN{pin}")
 
-        self.table.setRowCount(len(test_pins))
+        self.table.setRowCount(1)
 
-        for row, pin in enumerate(test_pins):
-            self.table.setItem(row, 0, QTableWidgetItem(str(pin)))
-            self.table.setItem(row, 1, QTableWidgetItem("—"))
+        values = [str(pin), pin_name, "—", "READY"]
 
-    # ------------------------------
-    # Update a single table row
-    # ------------------------------
+        for col, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(0, col, item)
+
     def update_table_result(self, row, result):
-        self.table.setItem(row, 1, QTableWidgetItem(result))
+        pin = int(self.tested_pin.currentText())
+        names = self.get_pin_names()
+        pin_name = names.get(pin, f"PIN{pin}")
 
-    # ------------------------------
-    # Collect parameters
-    # ------------------------------
+        voltage = float(result.replace(" V", ""))
+
+        passed = self.vlow.value() <= voltage <= self.vhigh.value()
+
+        values = [
+            str(pin),
+            pin_name,
+            result,
+            "PASS" if passed else "FAIL"
+        ]
+
+        for col, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            item.setTextAlignment(Qt.AlignCenter)
+
+            if col == 3:
+                item.setBackground(Qt.green if passed else Qt.red)
+
+            self.table.setItem(row, col, item)
+
     def collect_parameters(self):
         return {
             "Input pins": int(self.pins.value()),
-            "Vdd pin": self.vdd_pin.currentText(),
-            "Gnd pin": self.gnd_pin.currentText(),
+            "V+ pin": self.vdd_pin.currentText(),
+            "V- pin": self.gnd_pin.currentText(),
+            "Pin being tested": self.tested_pin.currentText(),
             "Max current (mA)": self.max_current.value(),
             "Vlow (V)": self.vlow.value(),
             "Vhigh (V)": self.vhigh.value(),
             "Chip name": self.chip_name.text(),
+            "Pin Names": self.get_pin_names(),
         }
 
-    # ------------------------------
-    # Start/Stop logic
-    # ------------------------------
     def start_or_stop(self):
         if not self.running:
             self.start_task()
@@ -262,9 +335,6 @@ class MainWindow(QWidget):
             self.stop_flag["stop"] = True
             self.button.setText("Stopping...")
 
-    # ------------------------------
-    # Start worker thread
-    # ------------------------------
     def start_task(self):
         self.running = True
         self.stop_flag["stop"] = False
@@ -272,49 +342,45 @@ class MainWindow(QWidget):
         self.button.setText("Stop")
         self.passfail_label.setText("RUNNING")
         self.passfail_label.setStyleSheet("background-color: yellow; padding: 6px;")
+        self.label.setText("Working...")
 
-        # Clear table when starting test
         self.update_table_rows()
 
         params = self.collect_parameters()
-        self.label.setText("Working...")
 
         threading.Thread(
             target=long_task,
-            args=(self.update_label, self.update_passfail, self.update_table_result, params, self.stop_flag),
+            args=(self.signals, params, self.stop_flag),
             daemon=True
         ).start()
 
-    # ------------------------------
-    # GUI update callback
-    # ------------------------------
     def update_label(self, text):
         self.label.setText(text)
 
-        if text in ("Done!", "Stopped"):
+        if text in ("Done!", "Stopped") or "Selected pin" in text:
             self.running = False
             self.button.setText("Start")
 
-
-    # ------------------------------
-    # Pass/Fail update callback
-    # ------------------------------
     def update_passfail(self, result):
         if result == "PASS":
             self.passfail_label.setText("PASS")
-            self.passfail_label.setStyleSheet("background-color: lightgreen; padding: 6px;")
+            self.passfail_label.setStyleSheet(
+                "background-color: lightgreen; padding: 6px;"
+            )
         elif result == "FAIL":
             self.passfail_label.setText("FAIL")
-            self.passfail_label.setStyleSheet("background-color: red; color: white; padding: 6px;")
+            self.passfail_label.setStyleSheet(
+                "background-color: red; color: white; padding: 6px;"
+            )
         else:
             self.passfail_label.setText("READY")
-            self.passfail_label.setStyleSheet("background-color: lightgray; padding: 6px;")
+            self.passfail_label.setStyleSheet(
+                "background-color: lightgray; padding: 6px;"
+            )
 
-# ------------------------------
-# Run the application
-# ------------------------------
+
 if __name__ == "__main__":
-    app = QApplication([])
+    app = QApplication(sys.argv)
     win = MainWindow()
     win.show()
-    app.exec()
+    sys.exit(app.exec())

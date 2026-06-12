@@ -23,7 +23,7 @@ class MainWindow(QWidget):
 
         form.addRow(QLabel("<h2>OPA551 Open-Loop Gain Test</h2>"))
 
-        self.smu_resource = QLineEdit("SMU")
+        self.smu_resource = QLineEdit("SMU1")
         form.addRow("PXIe-4138 Resource:", self.smu_resource)
 
         self.ps_resource = QLineEdit("PXI4110")

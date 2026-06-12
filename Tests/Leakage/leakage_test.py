@@ -15,7 +15,7 @@ INITIAL_SETTLE_DELAY = 1.0    # Wait after forcing voltage before reading
 MEASURE_DELAY = 0.1           # Delay between readings
 SUPPLY_SETTLE_DELAY = 1.0     # Wait after powering DUT
 
-SMU_RESOURCE = "SMU"          # Change if needed from NI MAX
+SMU_RESOURCE = "SMU1"          # Change if needed from NI MAX
 PS_RESOURCE = "PXI4110"       # Change if needed from NI MAX
 PS_CHANNEL = "1"              # Power supply channel used for DUT VDD
 PS_CURRENT_LIMIT = 0.1        # DUT supply current limit
